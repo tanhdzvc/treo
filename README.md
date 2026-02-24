@@ -1,2 +1,117 @@
-# treo
-...
+#!/data/data/com.termux/files/usr/bin/bash
+
+# ==========================================
+# CẤU HÌNH CƠ BẢN
+# ==========================================
+CHECK_INTERVAL=5             # Giảm xuống 5s để test các mốc 20s/30s cho mượt
+RESTART_INTERVAL=7200          # Force stop và mở lại toàn bộ sau 7200 giây (Test)
+
+JOIN_TARGET="https://www.roblox.com/share?code=98a1b858bf53db43b688552818e40748&type=Server"
+BASE_PACKAGE_NAME="com.roblox.clien"  # Đã trả lại "clien" theo yêu cầu
+ACCOUNT_SUFFIXES="b v w x y"          # Hậu tố của các bản clone
+
+# ==========================================
+# CÁC HÀM XỬ LÝ
+# ==========================================
+
+setup_display() {
+    echo "[SETUP] Lychkin"
+    su -c "wm size 1280x2800"
+    su -c "wm density 350"
+    # Khóa tự động xoay và ép màn hình xoay ngang (Landscape)
+    su -c "settings put system accelerometer_rotation 0"
+    su -c "settings put system user_rotation 1"
+    sleep 2
+    echo "[SETUP] Hoàn tất thiết lập màn hình và xoay ngang!"
+    echo ""
+}
+
+is_running() {
+    local pkg=$1
+    local output=$(su -c "ps -ef | grep $pkg | grep -v grep")
+    if [[ -n "$output" ]]; then
+        return 0 # Đang chạy
+    else
+        return 1 # Đã tắt
+    fi
+}
+
+launch_app() {
+    local pkg=$1
+    local deeplink="$JOIN_TARGET"
+    if [[ "$deeplink" =~ ^[0-9]+$ ]]; then
+        deeplink="roblox://placeId=${deeplink}"
+    fi
+    # Bật chế độ cửa sổ (5)
+    su -c "am start --windowingMode 5 -a android.intent.action.VIEW -d '${deeplink}' -p ${pkg} > /dev/null 2>&1"
+}
+
+kill_all_roblox() {
+    echo "[RESTART] Đã đủ thời gian, đang tiến hành đóng toàn bộ Roblox..."
+    for suffix in $ACCOUNT_SUFFIXES; do
+        pkg="${BASE_PACKAGE_NAME}${suffix}"
+        su -c "am force-stop $pkg"
+        echo "  -> Đã đóng $pkg"
+    done
+    sleep 3
+    echo "[RESTART] Đã đóng xong toàn bộ. Vòng lặp Monitor sẽ tự mở lại app."
+}
+
+# ==========================================
+# CÁC VÒNG LẶP ĐỘC LẬP
+# ==========================================
+
+# Vòng lặp 1: Kiểm tra và mở lại App
+loop_app_monitor() {
+    while true; do
+        H_TIME=$(date +"%H:%M:%S")
+        echo "[$H_TIME] Đang kiểm tra trạng thái các App..."
+        for suffix in $ACCOUNT_SUFFIXES; do
+            pkg="${BASE_PACKAGE_NAME}${suffix}"
+            
+            if is_running "$pkg"; then
+                echo "  [OK] $pkg đang chạy."
+            else
+                echo "  [START] $pkg đã tắt -> Đang mở lại..."
+                launch_app "$pkg"
+                sleep 5 # Đợi một chút để app load rồi mới mở app tiếp theo
+            fi
+        done
+        sleep $CHECK_INTERVAL
+    done
+}
+
+# Vòng lặp 2: Tự động khởi động lại toàn bộ
+loop_auto_restart() {
+    while true; do
+        sleep $RESTART_INTERVAL
+        kill_all_roblox
+    done
+}
+
+# ==========================================
+# CHƯƠNG TRÌNH CHÍNH
+# ==========================================
+
+# Đảm bảo tắt ngầm toàn bộ tiến trình con khi dừng (Ctrl+C)
+trap "echo -e '\n[!] Đang đóng toàn bộ các tiến trình ngầm...'; kill 0; exit" SIGINT SIGTERM
+
+termux-wake-lock
+
+echo "======================================="
+echo "  AUTO RESTARTER PRO (BASH SCRIPT)     "
+echo "  Tính năng: 2 vòng lặp chạy song song "
+echo "======================================="
+echo ""
+
+# Setup màn hình
+setup_display
+
+echo "[MAIN] Khởi chạy 2 vòng lặp ngầm..."
+
+# Gọi chạy ngầm bằng toán tử '&'
+loop_app_monitor &
+loop_auto_restart &
+
+# Dùng wait để giữ script chính sống mà không tốn tài nguyên
+wait
